@@ -1,4 +1,5 @@
 import os
+import uuid
 import json
 import socket
 import threading
@@ -30,23 +31,42 @@ class MediumInteractionSSH(paramiko.ServerInterface):
 
     def check_channel_shell_request(self, channel):
         return True
+def create_soc_ticket(ip, event_type, mitre_tag, cti_data, data):
+# Generates a quick 8-character ticketing ID
+ticket_id = f"INC-{str(uuid.uuid4())[:8]}"
+
+ticket = {
+    "ticket_id": ticket_id,
+    "title": f"Alert: {event_type} from {ip}",
+    "severity": "High",
+    "status": "New",
+    "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    "mitre_technique": mitre_tag,
+    "isp": cti_data.get("isp", "Unknown"),
+    "evidence": data
+}
+# Appends the structured ticket to our SOC ticketing queue file
+with open("soc_tickets.json", "a") as f:
+    f.write(json.dumps(ticket) + "\n")
+print(f"[+] SOC TICKET GENERATED: {ticket_id} (Status: New)")
 
 def log_event(ip, event_type, data, mitre_tag):
-    #Call for enrichment function to gather attacker's information
-    cti_data = enrich_ip_telemetry(ip)
+cti_data = enrich_ip_telemetry(ip)
 
-    entry = {
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        "src_ip": ip,
-        "event_type": event_type,
-        "intel": cti_data, 
-        "data": data,
-        "mitre_technique": mitre_tag
-    }
-    with open(LOG_FILE, "a") as f:
-        f.write(json.dumps(entry) + "\n")
-        print(f"[*] ENRICHED ALERT ({mitre_tag}): {ip} [{cti_data['isp']}] -> {data}")
-
+entry = {
+    "timestamp": datetime.utcnow().isoformat() + "Z",
+    "src_ip": ip,
+    "event_type": event_type,
+    "intel": cti_data,
+    "data": data,
+    "mitre_technique": mitre_tag
+}
+with open(LOG_FILE, "a") as f:
+    f.write(json.dumps(entry) + "\n")
+    print(f"[*] ENRICHED ALERT ({mitre_tag}): {ip} ({cti_data['isp']}) -> {data}")
+    
+    # Trigger our ticketing system right after writing the log
+    create_soc_ticket(ip, event_type, mitre_tag, cti_data, data)
 def handle_shell(channel, client_ip):
     motd = f"""
 Welcome to Ubuntu 22.04.3 LTS (GNU/Linux 5.15.0-82-generic x86_64)
